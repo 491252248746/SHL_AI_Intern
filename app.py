@@ -1,43 +1,65 @@
 from fastapi import FastAPI
+from pydantic import BaseModel
 import json
-from recommender import recommend_courses
+import os
 
-app = FastAPI(title="SHL API")
+from recommender import search_assessments
 
-# Load catalog safely
+app = FastAPI(title="SHL Assessment Recommender API")
+
+# Load catalog
 try:
     with open("catalog.json", "r", encoding="utf-8") as f:
         catalog = json.load(f)
-except Exception:
+
+    print("Loaded items:", len(catalog))
+
+except Exception as e:
+    print("Error loading catalog:", e)
     catalog = []
 
-@app.get("/")
-def home():
-    return {"message": "API is working"}
+# ----------------------------
+# Request Models
+# ----------------------------
+class Message(BaseModel):
+    role: str
+    content: str
 
+
+class ChatRequest(BaseModel):
+    messages: list[Message]
+
+
+# ----------------------------
+# Health Endpoint
+# ----------------------------
 @app.get("/health")
 def health():
-    return {"status": "ok",
-            "items_loaded": len(catalog)
-            }
-@app.get("/test")
-def test():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "items_loaded": len(catalog)
+    }
 
-@app.post("/recommend")
-def recommend(request: dict):
-    query = request.get("query", "").lower()
 
-    results = []
+# ----------------------------
+# Chat Endpoint
+# ----------------------------
+@app.post("/chat")
+def chat(request: ChatRequest):
 
-    for item in catalog:
-        name = item.get("name", "").lower()
-        desc = item.get("description", "").lower()
+    latest_message = request.messages[-1].content
 
-        if query in name or query in desc:
-            results.append(item)
-            return {
-        "query": query,
-        "count": len(results),
-        "results": results
+    results = search_assessments(catalog, latest_message)
+
+    if results:
+        return {
+            "reply": f"I found {len(results)} matching assessments.",
+            "recommendations": results,
+            "end_of_conversation": False
         }
+
+    return {
+        "reply": "I couldn't find a matching assessment. Please provide the job role, required skills, or experience level.",
+        "recommendations": [],
+        "end_of_conversation": False
+    }
